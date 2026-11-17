@@ -1,0 +1,35 @@
+name: Local preview contracts
+
+on:
+  push:
+    paths:
+      - 'mcp/**'
+      - 'tests/**'
+      - '.github/workflows/local-preview.yml'
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - 'tests/**'
+      - '.github/workflows/local-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Bootstrap uv
+        run: python -m pip install uv==0.10.11
+      - name: Install locked MCP dependencies
+        run: uv sync --project mcp --frozen
+      - name: Run portable tool contracts (not real-render certification)
+        run: >-
+          uv run --project mcp --frozen python -m unittest -v
+          tests.test_local_render tests.test_blender_cli
+          tests.test_tool_listing tests.test_documentation

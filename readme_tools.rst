@@ -16,6 +16,17 @@ The tools exposed by the MCP server.
 ``execute_blender_code_for_cli``
    Execute Python code in a background Blender process.
 
+``get_local_render_as_image_for_cli``
+   Render one saved frame locally on CPU with explicit preview limits.
+
+``get_render_as_image``
+   Render the connected Blender scene and return PNG image content without
+   saving overrides.
+
+``get_render_as_image_for_cli``
+   Open a saved blend in a background process, render it, and return PNG
+   image content.
+
 ``get_blendfile_summary_datablocks``
    Return a summary of the blend file: data-block counts, active workspace,
    and render engine.

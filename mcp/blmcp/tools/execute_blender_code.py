@@ -8,13 +8,15 @@ __all__ = ("register",)
 
 import base64
 import hashlib
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP, Image  # pylint: disable=import-error,no-name-in-module
+from mcp.types import ImageContent, ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+from pydantic import StrictInt
 
 from blmcp.tools_helpers.blender_cli import run_blender_cli, synced_blend_for_cli
 from blmcp.tools_helpers.connection import send_code
-from mcp.server.fastmcp import FastMCP, Image  # pylint: disable=import-error,no-name-in-module
-from mcp.types import ImageContent, ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 
 def register(mcp: FastMCP) -> None:
@@ -87,6 +89,84 @@ def register(mcp: FastMCP) -> None:
                 "source_sha256": source_sha256, "output_sha256": output_sha256,
                 "existed_before": False}
         return value
+
+    @mcp.tool(annotations=ToolAnnotations(
+        title="Render Local CPU Preview", readOnlyHint=True,
+    ))
+    def get_local_render_as_image_for_cli(
+        blend_file: str, width: StrictInt, height: StrictInt, samples: StrictInt,
+        timeout_seconds: StrictInt, frame: StrictInt, frame_count: StrictInt,
+    ) -> ImageContent:
+        """Render one saved frame locally on CPU with explicit preview limits.
+
+        Requires width/height 4..2048, samples 1..64, timeout_seconds 1..120,
+        frame -1048574..1048574 and frame_count=1. No GPU or cloud fallback.
+        Returns PNG bytes and source/render hashes without saving scene overrides.
+        Trusted local files only; this is not a sandbox or a durable job API.
+        """
+        for name, value, lower, upper in (
+            ("width", width, 4, 2048), ("height", height, 4, 2048),
+            ("samples", samples, 1, 64), ("timeout_seconds", timeout_seconds, 1, 120),
+            ("frame", frame, -1048574, 1048574), ("frame_count", frame_count, 1, 1),
+        ):
+            if type(value) is not int or not lower <= value <= upper:
+                raise ValueError("{:s} limit is {:d}..{:d}".format(name, lower, upper))
+        source = Path(blend_file).resolve(strict=True)
+        with source.open("rb") as stream:
+            source_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+        with tempfile.TemporaryDirectory(prefix="blmcp-local-render-") as temporary:
+            render_path = Path(temporary) / "render.png"
+            code = (
+                "import bpy\n"
+                "s = bpy.context.scene\n"
+                "s.frame_set({!r})\n"
+                # Rendering evaluates animation again. Freeze scene-level
+                # animation at the selected frame before applying preview caps.
+                # This affects only this unsaved subprocess copy.
+                "s.animation_data_clear()\n"
+                "s.render.engine = 'CYCLES'\n"
+                "s.cycles.device = 'CPU'\n"
+                "s.cycles.use_denoising = False\n"
+                "s.cycles.use_adaptive_sampling = False\n"
+                "s.render.threads_mode = 'FIXED'\n"
+                "s.render.threads = 2\n"
+                "s.render.resolution_percentage = 100\n"
+                "s.render.use_border = False\n"
+                "s.render.use_crop_to_border = False\n"
+                "s.render.use_multiview = False\n"
+                "s.render.use_compositing = False\n"
+                "s.render.use_sequencer = False\n"
+                "s.render.image_settings.file_format = 'PNG'\n"
+                "s.render.image_settings.color_mode = 'RGBA'\n"
+                "s.render.image_settings.color_depth = '8'\n"
+                "s.render.use_file_extension = True\n"
+                "s.render.resolution_x = {!r}\n"
+                "s.render.resolution_y = {!r}\n"
+                "s.cycles.samples = {!r}\n"
+                "for layer in s.view_layers: layer.samples = 0\n"
+                "s.render.filepath = {!r}\n"
+                "bpy.ops.render.render(write_still=True)\n"
+                "image = bpy.data.images.load(s.render.filepath, check_existing=False)\n"
+                "assert tuple(image.size) == ({!r}, {!r}), 'render dimensions mismatch'\n"
+                "assert len(image.pixels) > 0, 'render could not be decoded'\n"
+                "result = {{'blender_version': bpy.app.version_string, "
+                "'build_hash': bpy.app.build_hash.decode('ascii'), 'device': 'CPU', "
+                "'samples': s.cycles.samples, "
+                "'view_layer_samples': [layer.samples for layer in s.view_layers]}}\n"
+            ).format(frame, width, height, samples, str(render_path), width, height)
+            runtime = run_blender_cli(str(source), code, timeout=timeout_seconds,
+                                      arbitrary_code=False)
+            with source.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != source_sha256:
+                    raise RuntimeError("Source changed during local render")
+            data = render_path.read_bytes()
+            return ImageContent(
+                type="image", data=base64.b64encode(data).decode("ascii"), mimeType="image/png",
+                _meta={"source": str(source), "source_sha256": source_sha256,
+                       "render_sha256": hashlib.sha256(data).hexdigest(), "runtime": runtime,
+                       "width": width, "height": height, "samples": samples, "frame": frame,
+                       "frame_count": frame_count, "timeout_seconds": timeout_seconds},
+            )
 
     @mcp.tool(
         annotations=ToolAnnotations(

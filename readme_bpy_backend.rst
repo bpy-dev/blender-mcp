@@ -171,6 +171,17 @@ default weak-sandbox path. This distinction must not be treated as strong
 security containment.
 
 
+Local CPU previews
+==================
+
+``get_local_render_as_image_for_cli`` adds an explicit one-frame CPU preview
+with resolution, sample and subprocess-deadline limits. It does not require
+CUDA and never falls back to cloud. The historical
+``get_render_as_image_for_cli`` CUDA benchmark path remains unchanged.
+See `local preview acceptance and limitations <docs/local-preview.md>`__ for
+the agent call, editable-file workflow, reproducible tests and remaining gates.
+
+
 Troubleshooting
 ===============
 
