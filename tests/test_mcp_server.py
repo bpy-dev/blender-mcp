@@ -921,11 +921,13 @@ class TestMCPServer(unittest.TestCase):
 
     def test_cli_tools_have_non_cli_twins(self) -> None:
         """
-        Checks that every ``_for_cli`` tool has a matching non-CLI version.
+        Checks CLI twins except the intentionally saved-file-only CPU preview.
         """
+        cli_only = {"get_local_render_as_image_for_cli"}
+        self.assertTrue(cli_only <= self._tools_by_name.keys())
         checked = 0
         for name in self._tools_by_name:
-            if not name.endswith("_for_cli"):
+            if not name.endswith("_for_cli") or name in cli_only:
                 continue
             self.assertIn(
                 name[:-8],

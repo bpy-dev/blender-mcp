@@ -46,8 +46,8 @@ opening the source or starting Blender. The selected backend must have Cycles
 CPU support. No GPU detection, provider integration or cloud fallback occurs.
 
 The child renders on CPU with two threads, explicit dimensions and samples,
-100% scale, and border/crop, multiview, compositor, sequencer, adaptive sampling
-and denoising disabled. Scene-level animation is evaluated at the selected frame
+100% scale, and border/crop, multiview, compositor, sequencer, adaptive sampling,
+denoising and sample subsets disabled. Scene-level animation is evaluated at the selected frame
 and then frozen in the subprocess copy so render-time re-evaluation cannot
 restore an animated sample count above the requested cap; view-layer sample
 overrides are reset to use the capped scene setting. These are **preview
@@ -74,7 +74,9 @@ Portable contracts (also run by `.github/workflows/local-preview.yml`):
 uv sync --project mcp --frozen
 uv run --project mcp --frozen python -m unittest -v \
   tests.test_local_render tests.test_blender_cli \
-  tests.test_tool_listing tests.test_documentation
+  tests.test_tool_listing tests.test_documentation \
+  tests.test_preview_compatibility tests.test_mcp_server \
+  tests.integration.test_local_cpu_session
 ```
 
 Real-runtime acceptance (requires a separately installed, working standalone

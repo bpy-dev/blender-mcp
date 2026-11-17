@@ -21,7 +21,6 @@ from unittest import mock
 
 from blmcp.tools_helpers.blender_cli import run_blender_cli
 from mcp.client.stdio import stdio_client
-from PIL import Image
 
 from mcp import ClientSession, StdioServerParameters
 
@@ -29,6 +28,8 @@ from mcp import ClientSession, StdioServerParameters
 @unittest.skipUnless(os.environ.get('BLENDER_MCP_BPY_PYTHON'), 'requires real bpy interpreter')
 class TestLocalCPUSession(unittest.TestCase):
     def test_inspect_edit_preview_fork(self):
+        from PIL import Image
+
         with tempfile.TemporaryDirectory(prefix='local-session-') as temporary:
             directory = Path(os.environ.get('BLMCP_LOCAL_EVIDENCE', temporary)).resolve()
             directory.mkdir(parents=True, exist_ok=True)
@@ -65,6 +66,9 @@ scene.render.engine = 'CYCLES'
 scene.render.resolution_x = 999
 scene.render.resolution_y = 777
 scene.render.resolution_percentage = 50
+scene.cycles.use_sample_subset = True
+scene.cycles.sample_offset = 3
+scene.cycles.sample_subset_length = 12
 scene.cycles.samples = 1000
 scene.cycles.keyframe_insert(data_path='samples', frame=1)
 bpy.context.view_layer.samples = 1000
@@ -141,6 +145,7 @@ scene.view_settings.view_transform = 'Standard'
                             self.assertGreater(pixel[channel], 200)
                             self.assertLess(pixel[(channel + 1) % 3], 20)
                         self.assertEqual(content.meta['runtime']['samples'], 2)
+                        self.assertIs(content.meta['runtime']['use_sample_subset'], False)
                         self.assertEqual(content.meta['runtime']['view_layer_samples'], [0])
                         self.assertEqual(content.meta['source_sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
                         self.assertEqual(content.meta['render_sha256'], hashlib.sha256(data).hexdigest())

@@ -33,3 +33,5 @@ jobs:
           uv run --project mcp --frozen python -m unittest -v
           tests.test_local_render tests.test_blender_cli
           tests.test_tool_listing tests.test_documentation
+          tests.test_preview_compatibility tests.test_mcp_server
+          tests.integration.test_local_cpu_session
