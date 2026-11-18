@@ -5,6 +5,11 @@ from pathlib import Path
 import sys
 
 def main():
+    if sys.argv[1:] == ['--transport', 'tailcat']:
+        from tailcat_session import main as serve_session
+        sys.exit(serve_session())
+    if os.environ.get('TAILCAT_PEER_KEY'):
+        print('bpy: authenticated MCP session started', file=sys.stderr, flush=True)
     import bpy
     expected = json.loads(Path('/opt/runtime/release.lock.json').read_text())['version']
     if bpy.app.version_string.split()[0] != expected:

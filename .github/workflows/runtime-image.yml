@@ -98,6 +98,14 @@ jobs:
           docker image inspect bpy-runtime:candidate > evidence/image.json
           cp docker/runtime/release.lock.json evidence/
           docker save bpy-runtime:candidate | gzip > evidence/runtime-image.tar.gz
+      - name: Exercise authenticated Tailcat session on native image
+        env:
+          RELEASE_TAG: ${{ matrix.tag }}
+        run: |
+          python3 -m venv .tailcat-gate
+          .tailcat-gate/bin/pip install --only-binary=:all: pillow==13.0.0
+          .tailcat-gate/bin/python docker/runtime/tailcat_smoke.py --image bpy-runtime:candidate \
+            --version "${RELEASE_TAG#v}" --output evidence/tailcat
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runtime-${{ matrix.tag }}-${{ matrix.arch }}-${{ github.sha }}

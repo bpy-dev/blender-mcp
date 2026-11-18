@@ -28,7 +28,9 @@ COPY mcp /opt/source/mcp
 RUN uv pip install --python /opt/venv/bin/python --no-deps --no-build-isolation /opt/source/mcp \
     && uv pip check --python /opt/venv/bin/python \
     && rm -rf /opt/source /usr/local/bin/uv
-COPY docker/runtime/entrypoint.py /opt/runtime/entrypoint.py
+COPY docker/runtime/entrypoint.py docker/runtime/tailcat_session.py /opt/runtime/
+COPY docker/runtime/tailcat_install.py /opt/runtime/
+RUN python /opt/runtime/tailcat_install.py "$TARGETARCH"
 COPY LICENSE NOTICE.md /opt/runtime/
 RUN useradd --create-home --uid 10001 runtime && mkdir /workspace && chown runtime:runtime /workspace
 ENV BLENDER_MCP_CLI_BACKEND=bpy BLENDER_MCP_BPY_PYTHON=/opt/venv/bin/python \
