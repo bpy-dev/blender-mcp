@@ -2,10 +2,11 @@
 
 ## Status and boundary
 
-Implemented locally, pending independent review and PR delivery. Not merged or
-published; no deployment. This is the first bounded increment of the local agent
-loop, **not** completion of Fstack PR23's entire local acceptance or the full
-Hermes plugin. No Fstack, website, buildbpy, cloud or billing code changes.
+Merged in [PR #3](https://github.com/bpy-dev/blender-mcp/pull/3) at
+`3d1a394096a273b2bd17e7db5378776b02c4c1d6`; no deployment. This is the first
+bounded increment of the local agent loop, **not** completion of Fstack PR23's
+entire local acceptance or the full Hermes plugin. This runtime increment changes
+no Fstack, website, buildbpy, cloud or billing code.
 
 Audit base: `bpy-dev/blender-mcp` `e8ac4088d4a3e0469d3eff9f9bb2dd717e899219`.
 The existing registered surface supplies live-session tools and saved-file
@@ -19,6 +20,81 @@ The missing small behavior was a usable CPU preview without CUDA. The additive
 cleanup behavior. Existing `execute_blender_code_for_cli` remains the edit/save/
 fork interface; no session framework or scheduler was added. A saved output path
 plus hash receipt is **not** yet an immutable checkpoint/dependency manifest.
+
+## Launch from the public repository
+
+No private demonstration harness is required. Install Git and
+[uv](https://docs.astral.sh/uv/), then use the exact merged source:
+
+```sh
+git clone https://github.com/bpy-dev/blender-mcp.git
+cd blender-mcp
+git checkout --detach 3d1a394096a273b2bd17e7db5378776b02c4c1d6
+uv sync --project mcp --frozen
+uv run --project mcp --frozen blender-mcp --help
+```
+
+A working standalone bpy interpreter is a separate prerequisite; the MCP
+package does not install Blender. Follow the platform-specific setup and wheel
+provenance notes in [the backend guide](../readme_bpy_backend.rst). Verify the
+interpreter you actually installed (replace the absolute path):
+
+```sh
+/absolute/path/to/bpy-python -c \
+  'import bpy, sys; print(sys.version, bpy.app.version_string, bpy.app.build_hash)'
+```
+
+The backend guide's 5.2.1 macOS matrix is not a Linux wheel availability promise.
+This CPU increment was also exercised on Linux aarch64 with native bpy 5.2.0 LTS;
+use the real-runtime acceptance below to check your own installation.
+
+Configure your MCP client's stdio server entry, substituting both absolute paths:
+
+```json
+{
+  "mcpServers": {
+    "blender": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/blender-mcp/mcp", "run", "--frozen", "blender-mcp", "--transport", "stdio"],
+      "env": {
+        "BLENDER_MCP_CLI_BACKEND": "bpy",
+        "BLENDER_MCP_BPY_PYTHON": "/absolute/path/to/bpy-python"
+      }
+    }
+  }
+}
+```
+
+`mcpServers` is a common client configuration shape, not a universal config-file
+format. Translate this command/argument/environment entry using your client's
+MCP instructions; do not replace unrelated servers or profile settings. The client
+starts the stdio process and owns its lifetime. Running it in a shell alone waits
+for protocol messages; it is not a chat interface. No HTTP listener is needed.
+
+First run the real-runtime acceptance below from the repository root. It creates
+its own tiny saved scene and checks actual MCP edit/save/reopen/fork/preview calls,
+so no model account, private scripts, or pre-existing scene is needed. To retain
+its editable scenes and PNGs, set `BLMCP_LOCAL_EVIDENCE` to a fresh absolute output
+directory. `BLENDER_MCP_BPY_PYTHON` must be set or the test **skips** rather than
+proving rendering. If an agent host injects a `PYTHONPATH`, use a clean shell or
+unset that variable for these commands so unrelated test packages cannot shadow
+this repository's `tests` package.
+
+For model-driven use, connect the client, list tools and choose the saved-file
+`_for_cli` tools, not live-UI tools that require the Blender add-on. Start with a
+trusted `.blend` containing a camera. Ask the agent to inspect it, make an edit
+using `execute_blender_code_for_cli`, explicitly save to a distinct absolute
+checkpoint path, call the CPU preview below, then save a revision to a second
+new path. Preserve the original. Inspect returned PNGs and reopen saved files;
+text claiming a save or render is not verification. Keep execution approval
+on-request and review each generated-code operation; do not bypass client sandbox
+or approval controls to make tools run. A refused operation needs the client's
+normal approval flow.
+
+Model access/authentication is configured through the client's supported login
+flow. Rendering is local; model inference may still be hosted and billable.
+The model-free acceptance is not an autonomous-agent test, and local rendering
+is not proof of offline inference or a production network sandbox.
 
 ## Agent call
 
