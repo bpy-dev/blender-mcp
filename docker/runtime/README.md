@@ -110,8 +110,12 @@ A newly created GHCR package normally starts **private**. Its package owner may
 need to set visibility to public in GitHub package settings after the first push.
 This workflow does not invent a visibility API or change account credentials. It
 fails the publication gate unless an unauthenticated registry client can read the
-index and both children and a fresh empty Docker credential directory can pull
-both architectures by the immutable index digest. The first visibility failure is
+index and both children, stream and hash-check every compressed layer from GHCR
+for both architectures without consulting Docker's cached content, and then pull
+both architectures by immutable index digest with an empty Docker credential
+directory. The layer download receipts bind architecture, digest and byte size;
+the Docker pulls alone do not establish cold downloads because daemon layers may
+already be cached. The first visibility failure is
 not successful public publication. After making the package public, rerun the
 failed publish job while the same run's tested archives still exist. Do not rerun
 all jobs merely to recover visibility: rebuilt OS layers can differ, and existing

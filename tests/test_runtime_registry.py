@@ -1,5 +1,6 @@
 """Registry boundary regressions; fixtures are not hosted publication evidence."""
 import hashlib
+import io
 import importlib.util
 import json
 from pathlib import Path
@@ -80,6 +81,40 @@ class RegistryTests(unittest.TestCase):
         with patch.object(registry, 'fetch', side_effect=lambda url, token=None: responses[url]):
             with self.assertRaisesRegex(ValueError, 'digest mismatch'):
                 registry.verify(tag, SOURCE, FINGERPRINT)
+
+    def test_anonymous_layers_are_downloaded_and_hashed_without_docker_cache(self):
+        data = b'compressed registry layer'
+        descriptor = {'digest': 'sha256:' + hashlib.sha256(data).hexdigest(), 'size': len(data)}
+        for payload, valid in [(data, True), (data[:-1], False), (b'x' * len(data), False), (data + b'x', False)]:
+            with self.subTest(payload=payload), patch.object(registry.urllib.request, 'urlopen', return_value=io.BytesIO(payload)) as request:
+                if valid:
+                    self.assertEqual(registry.download_layer(descriptor, 'anonymous-token'), descriptor)
+                else:
+                    with self.assertRaises(ValueError):
+                        registry.download_layer(descriptor, 'anonymous-token')
+                self.assertEqual(request.call_args.args[0].full_url, 'https://ghcr.io/v2/bpy-dev/bpy-runtime/blobs/' + descriptor['digest'])
+        workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
+        self.assertIn('--download-layers', workflow)
+
+    def test_verify_requires_layers_for_each_architecture(self):
+        responses, tag, url = self.fixture()
+        index = json.loads(responses[url])
+        descriptor = {'digest': 'sha256:' + 'f' * 64, 'size': 20}
+        for child in index['manifests']:
+            child_url = 'https://ghcr.io/v2/bpy-dev/bpy-runtime/manifests/' + child['digest']
+            manifest = json.loads(responses[child_url])
+            manifest['layers'] = [descriptor]
+            raw = json.dumps(manifest).encode()
+            child['digest'] = 'sha256:' + hashlib.sha256(raw).hexdigest()
+            responses['https://ghcr.io/v2/bpy-dev/bpy-runtime/manifests/' + child['digest']] = raw
+        responses[url] = json.dumps(index).encode()
+        with patch.object(registry, 'fetch', side_effect=lambda url, token=None: responses[url]), patch.object(registry, 'download_layer', return_value=descriptor) as download:
+            result = registry.verify(tag, SOURCE, FINGERPRINT, download_layers=True)
+            self.assertEqual(download.call_count, 2)
+            self.assertEqual({item['architecture'] for item in result['downloaded_layers']}, {'amd64', 'arm64'})
+        with patch.object(registry, 'fetch', side_effect=lambda url, token=None: responses[url]), patch.object(registry, 'download_layer', side_effect=ValueError('layer unavailable')):
+            with self.assertRaises(ValueError):
+                registry.verify(tag, SOURCE, FINGERPRINT, download_layers=True)
 
     def test_reject_provenance_and_missing_or_duplicate_architecture(self):
         responses, tag, _ = self.fixture(wrong_label=True)

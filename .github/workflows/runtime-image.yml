@@ -172,7 +172,7 @@ jobs:
         run: |
           # A new GHCR package defaults private. Fail until its owner makes it public;
           # do not substitute an authenticated pull or introduce another credential.
-          python3 docker/runtime/registry.py --source "$SOURCE_SHA" --fingerprint "$FINGERPRINT" --tag "$IMAGE_TAG" > publication.json
+          python3 docker/runtime/registry.py --source "$SOURCE_SHA" --fingerprint "$FINGERPRINT" --tag "$IMAGE_TAG" --download-layers > publication.json
           digest=$(jq -r .digest publication.json)
           anonymous=$(mktemp -d)
           trap 'rm -rf "$anonymous"' EXIT

@@ -49,7 +49,27 @@ def fetch(url, token=None):
         return response.read()
 
 
-def verify(tag, source, fingerprint):
+def download_layer(descriptor, token):
+    """Stream every compressed blob from GHCR; never consult Docker's cache."""
+    digest, expected_size = descriptor['digest'], descriptor['size']
+    if (not re.fullmatch('sha256:[0-9a-f]{64}', digest) or
+            type(expected_size) is not int or expected_size <= 0):
+        raise ValueError('invalid layer descriptor')
+    request = urllib.request.Request('https://ghcr.io/v2/' + REPOSITORY + '/blobs/' + digest,
+                                     headers={'Authorization': 'Bearer ' + token})
+    actual, size = hashlib.sha256(), 0
+    with urllib.request.urlopen(request, timeout=120) as response:
+        while data := response.read(1024 * 1024):
+            size += len(data)
+            if size > expected_size:
+                raise ValueError('layer exceeds manifest size')
+            actual.update(data)
+    if size != expected_size or 'sha256:' + actual.hexdigest() != digest:
+        raise ValueError('anonymous layer size/digest mismatch')
+    return {'digest': digest, 'size': size}
+
+
+def verify(tag, source, fingerprint, download_layers=False):
     expected_tag = candidate_tag(source, fingerprint)
     if tag != expected_tag:
         raise ValueError('candidate tag does not match inputs')
@@ -65,6 +85,7 @@ def verify(tag, source, fingerprint):
 
     index, digest = document('manifests', tag)
     children = validate_index(index)
+    downloaded = []
     for child in children:
         manifest, _ = document('manifests', child['digest'])
         config, _ = document('blobs', manifest['config']['digest'])
@@ -73,8 +94,16 @@ def verify(tag, source, fingerprint):
         labels = config.get('config', {}).get('Labels', {})
         if labels.get('org.opencontainers.image.revision') != source or labels.get('dev.bpy.release-fingerprint') != fingerprint:
             raise ValueError('child provenance mismatch')
+        if download_layers:
+            layers = manifest.get('layers')
+            if not isinstance(layers, list) or not layers:
+                raise ValueError('missing image layers')
+            for layer in layers:
+                downloaded.append(dict(download_layer(layer, token),
+                                       architecture=child['platform']['architecture']))
     return {'image': IMAGE, 'tag': tag, 'digest': digest, 'source': source,
-            'fingerprint': fingerprint, 'manifests': children, 'anonymous': True}
+            'fingerprint': fingerprint, 'manifests': children, 'anonymous': True,
+            'downloaded_layers': downloaded}
 
 
 def plan(matrix, source, skip_published):
@@ -162,6 +191,7 @@ def main():
     parser.add_argument('--publish', choices=['child', 'index'])
     parser.add_argument('--expected')
     parser.add_argument('--children', nargs=2)
+    parser.add_argument('--download-layers', action='store_true')
     parser.add_argument('--source', required=True)
     parser.add_argument('--matrix', type=Path)
     parser.add_argument('--skip-published', action='store_true')
@@ -174,7 +204,7 @@ def main():
     if args.matrix:
         result = plan(json.loads(args.matrix.read_text()), args.source, args.skip_published)
     else:
-        result = verify(args.tag, args.source, args.fingerprint)
+        result = verify(args.tag, args.source, args.fingerprint, args.download_layers)
     print(json.dumps(result, separators=(',', ':')))
 
 
