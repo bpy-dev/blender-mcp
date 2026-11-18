@@ -5,6 +5,10 @@ It runs MCP stdio with the standalone bpy backend. It does not expose a public
 HTTP service or install anything at startup. Run untrusted scene code only with
 explicit, non-sensitive mounts; MCP code execution is not a security sandbox.
 
+Opt-in [`--transport tailcat`](TAILCAT.md) adds a prebaked, per-session client
+allowlist with a finite lifetime. Default offline stdio remains unchanged. Read
+its private bootstrap and provider-control-plane trust boundary before deployment.
+
 ## Build and run
 
 ```sh
