@@ -1,0 +1,191 @@
+name: Rebuild bpy runtime candidates
+on:
+  pull_request:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional exact qualified buildbpy tag (v5.3.x); empty scans complete releases'
+        type: string
+        required: false
+  push:
+    branches: [main]
+    paths: ['mcp/**', 'docker/runtime/**', 'tests/test_runtime_*.py', '.github/workflows/runtime-image.yml']
+permissions:
+  contents: read
+concurrency:
+  group: bpy-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.releases.outputs.matrix }}
+      publish: ${{ steps.releases.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Admit complete upstream releases (no cross-repo secret)
+        id: releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+          TRUSTED: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        run: |
+          python3 -m unittest discover -s tests -p 'test_runtime_*.py' -v
+          python3 docker/runtime/release.py --matrix ${RELEASE_TAG:+--tag "$RELEASE_TAG"} > matrix.json
+          skip=()
+          if [ "$TRUSTED" = true ]; then skip=(--skip-published); fi
+          python3 docker/runtime/registry.py --source "$SOURCE_SHA" --matrix matrix.json "${skip[@]}" > plan.json
+          printf 'matrix=%s\n' "$(jq -c .build plan.json)" >> "$GITHUB_OUTPUT"
+          printf 'publish=%s\n' "$(jq -c .publish plan.json)" >> "$GITHUB_OUTPUT"
+          # A PR must exercise real native builds, not silently pass an empty matrix.
+          if [ "$TRUSTED" != true ]; then jq -e '.build.include | length > 0' plan.json; fi
+  build:
+    needs: discover
+    if: ${{ needs.discover.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Resolve and freeze exact release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ matrix.tag }}
+          EXPECTED_FINGERPRINT: ${{ matrix.fingerprint }}
+        run: |
+          python3 docker/runtime/release.py --tag "$RELEASE_TAG" --lock docker/runtime/release.lock.json
+          python3 -c 'import hashlib,json,os; p="docker/runtime/release.lock.json"; actual=hashlib.sha256(json.dumps(json.load(open(p)),sort_keys=True).encode()).hexdigest(); assert actual==os.environ["EXPECTED_FINGERPRINT"], "release changed during admission"'
+      - name: Build native candidate only
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: docker/runtime/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          tags: bpy-runtime:candidate
+          labels: |
+            org.opencontainers.image.source=https://github.com/bpy-dev/blender-mcp
+            org.opencontainers.image.revision=${{ github.sha }}
+            dev.bpy.release-fingerprint=${{ matrix.fingerprint }}
+          cache-from: type=gha,scope=bpy-runtime-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=bpy-runtime-${{ matrix.arch }}
+      - name: Exercise offline MCP entrypoint and CPU render
+        env:
+          RELEASE_TAG: ${{ matrix.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(docker image inspect --format '{{.Architecture}}' bpy-runtime:candidate)" = "$ARCH"
+          mkdir evidence
+          chmod 777 evidence
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --mount type=bind,src="$PWD",dst=/test,readonly \
+            --mount type=bind,src="$PWD/evidence",dst=/evidence \
+            --entrypoint /opt/venv/bin/python bpy-runtime:candidate \
+            /test/docker/runtime/smoke.py --version "${RELEASE_TAG#v}" \
+            --fixture /test/benchmarks/token_efficiency/fixtures/render_source.blend \
+            --output /evidence /opt/venv/bin/python /opt/runtime/entrypoint.py
+          docker image inspect bpy-runtime:candidate > evidence/image.json
+          cp docker/runtime/release.lock.json evidence/
+          docker save bpy-runtime:candidate | gzip > evidence/runtime-image.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-${{ matrix.tag }}-${{ matrix.arch }}-${{ github.sha }}
+          path: evidence/
+          compression-level: 0
+          retention-days: 7
+  runtime-gate:
+    name: Runtime native CPU gates
+    needs: [discover, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          DISCOVER: ${{ needs.discover.result }}
+          BUILD: ${{ needs.build.result }}
+          MATRIX: ${{ needs.discover.outputs.matrix }}
+        run: |
+          test "$DISCOVER" = success
+          if [ "$MATRIX" = '{"include":[]}' ]; then test "$BUILD" = skipped; else test "$BUILD" = success; fi
+  publish:
+    needs: [discover, build]
+    if: ${{ github.repository == 'bpy-dev/blender-mcp' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.publish) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IMAGE: ghcr.io/bpy-dev/bpy-runtime
+      IMAGE_TAG: ${{ matrix.image_tag }}
+      SOURCE_SHA: ${{ github.sha }}
+      FINGERPRINT: ${{ matrix.fingerprint }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: runtime-${{ matrix.tag }}-*-${{ github.sha }}
+          path: artifacts
+      - name: Publish exactly the two tested images, then assemble index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          for arch in amd64 arm64; do
+            dir="artifacts/runtime-${{ matrix.tag }}-$arch-$SOURCE_SHA"
+            test -s "$dir/receipt.json"
+            docker load -i "$dir/runtime-image.tar.gz"
+            test "$(docker image inspect --format '{{.Architecture}}' bpy-runtime:candidate)" = "$arch"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' bpy-runtime:candidate)" = "$SOURCE_SHA"
+            test "$(docker image inspect --format '{{index .Config.Labels "dev.bpy.release-fingerprint"}}' bpy-runtime:candidate)" = "$FINGERPRINT"
+            ref="$IMAGE:$IMAGE_TAG-$arch"
+            python3 docker/runtime/registry.py --source "$SOURCE_SHA" --publish child \
+              --tag "$IMAGE_TAG-$arch" --expected "$(docker image inspect --format '{{.Id}}' bpy-runtime:candidate)"
+            docker buildx imagetools inspect "$ref" --raw > "$arch.json"
+            test "$(jq -r .config.digest "$arch.json")" = "$(docker image inspect --format '{{.Id}}' bpy-runtime:candidate)"
+            digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')
+            printf '%s@%s\n' "$IMAGE" "$digest" > "$arch.ref"
+          done
+          python3 docker/runtime/registry.py --source "$SOURCE_SHA" --publish index \
+            --tag "$IMAGE_TAG" --children "$(cut -d@ -f2 amd64.ref)" "$(cut -d@ -f2 arm64.ref)"
+          docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --raw > published-index.json
+          python3 -c 'import json; a=json.load(open("published-index.json"))["manifests"]; expected={open(p+".ref").read().strip().split("@")[1] for p in ("amd64","arm64")}; assert len(a)==2 and {m["digest"] for m in a}==expected'
+      - name: Require public anonymous manifests and complete pulls
+        run: |
+          # A new GHCR package defaults private. Fail until its owner makes it public;
+          # do not substitute an authenticated pull or introduce another credential.
+          python3 docker/runtime/registry.py --source "$SOURCE_SHA" --fingerprint "$FINGERPRINT" --tag "$IMAGE_TAG" --download-layers > publication.json
+          digest=$(jq -r .digest publication.json)
+          anonymous=$(mktemp -d)
+          trap 'rm -rf "$anonymous"' EXIT
+          for arch in amd64 arm64; do
+            docker --config "$anonymous" pull --platform "linux/$arch" "$IMAGE@$digest"
+          done
+          printf 'Published CPU-qualified candidate: %s@%s\n' "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: publication-${{ matrix.tag }}-${{ github.sha }}
+          path: |
+            publication.json
+            published-index.json
+            amd64.json
+            arm64.json
+          retention-days: 30
