@@ -18,6 +18,7 @@ H.264 video is 848×464, 134.9 seconds, and 10,161,884 bytes; SHA-256:
 ### What is enhanced
 
 - **Saved-file tools:** `_for_cli` tools operate on `.blend` files in fresh subprocesses without requiring a live Blender UI session.
+- **Local CPU previews:** the additive capped preview tool supports saved-file agent edit/save/fork workflows without CUDA; see [local milestone status and acceptance](docs/local-preview.md). Existing CUDA benchmark rendering is unchanged.
 - **Backend selection:** use a Blender executable backend or a standalone `bpy` Python backend with `BLENDER_MCP_CLI_BACKEND`.
 - **Runtime API lookup:** agents can query exact signatures, enums, defaults, and availability from the active Blender/`bpy` runtime instead of relying only on bundled docs.
 - **Process isolation:** command-line executions are bounded by explicit timeouts, output caps, compact JSON framing, and source-file overwrite checks. This is crash/process-state isolation, not an OS sandbox.

@@ -89,6 +89,58 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_local_render_as_image_for_cli",
+        "description": "Render one saved frame locally on CPU with explicit preview limits.\n"
+        "\n"
+        "Requires width/height 4..2048, samples 1..64, timeout_seconds 1..120,\n"
+        "frame -1048574..1048574 and frame_count=1. No GPU or cloud fallback.\n"
+        "Returns PNG bytes and source/render hashes without saving scene overrides.\n"
+        "Trusted local files only; this is not a sandbox or a durable job API.\n",
+        "inputSchema": {
+            "properties": {
+                "blend_file": {
+                    "title": "Blend File",
+                    "type": "string"
+                },
+                "width": {
+                    "title": "Width",
+                    "type": "integer"
+                },
+                "height": {
+                    "title": "Height",
+                    "type": "integer"
+                },
+                "samples": {
+                    "title": "Samples",
+                    "type": "integer"
+                },
+                "timeout_seconds": {
+                    "title": "Timeout Seconds",
+                    "type": "integer"
+                },
+                "frame": {
+                    "title": "Frame",
+                    "type": "integer"
+                },
+                "frame_count": {
+                    "title": "Frame Count",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "blend_file",
+                "width",
+                "height",
+                "samples",
+                "timeout_seconds",
+                "frame",
+                "frame_count"
+            ],
+            "title": "get_local_render_as_image_for_cliArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_render_as_image",
         "description": "Render the connected Blender scene and return PNG image content without saving overrides.",
         "inputSchema": {
