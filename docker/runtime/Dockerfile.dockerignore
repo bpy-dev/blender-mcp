@@ -1,0 +1,13 @@
+**
+!mcp/
+!mcp/**
+!docker/
+!docker/runtime/
+!docker/runtime/**
+!LICENSE
+!NOTICE.md
+**/__pycache__
+**/.venv
+**/*.whl
+**/.env
+**/.git

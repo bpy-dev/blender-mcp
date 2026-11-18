@@ -1,0 +1,8 @@
+# MCP versions constrained by mcp/uv.lock exported requirements.
+cattrs
+cython
+numpy>=2.2,<3
+requests
+zstandard
+pillow
+setuptools==80.9.0
