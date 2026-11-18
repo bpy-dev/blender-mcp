@@ -112,8 +112,10 @@ This workflow does not invent a visibility API or change account credentials. It
 fails the publication gate unless an unauthenticated registry client can read the
 index and both children, stream and hash-check every compressed layer from GHCR
 for both architectures without consulting Docker's cached content, and then pull
-both architectures by immutable index digest with an empty Docker credential
-directory. The layer download receipts bind architecture, digest and byte size;
+both architectures by their immutable child digests bound to the verified index,
+with an empty Docker credential directory. Distinct child references avoid the
+classic Docker store's same-index-reference cross-platform collision. The layer
+download receipts bind architecture, digest and byte size;
 the Docker pulls alone do not establish cold downloads because daemon layers may
 already be cached. The first visibility failure is
 not successful public publication. After making the package public, rerun the

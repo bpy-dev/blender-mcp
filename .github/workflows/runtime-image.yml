@@ -177,7 +177,13 @@ jobs:
           anonymous=$(mktemp -d)
           trap 'rm -rf "$anonymous"' EXIT
           for arch in amd64 arm64; do
-            docker --config "$anonymous" pull --platform "linux/$arch" "$IMAGE@$digest"
+            # Classic Docker stores cannot bind both platforms to one index ref.
+            child=$(jq -er --arg arch "$arch" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)] | if length == 1 then .[0].digest else error("expected one platform child") end' publication.json)
+            ref="$IMAGE@$child"
+            docker --config "$anonymous" pull --platform "linux/$arch" "$ref"
+            test "$(docker image inspect --format '{{.Architecture}}' "$ref")" = "$arch"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")" = "$SOURCE_SHA"
+            test "$(docker image inspect --format '{{index .Config.Labels "dev.bpy.release-fingerprint"}}' "$ref")" = "$FINGERPRINT"
           done
           printf 'Published CPU-qualified candidate: %s@%s\n' "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
