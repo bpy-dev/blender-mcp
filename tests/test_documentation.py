@@ -6,11 +6,15 @@
 
 __all__ = ()
 
+import copy
 import io
 import json
 import os
 import re
+import shlex
 import unittest
+
+import yaml
 
 import docutils.core  # type: ignore[import-untyped]
 
@@ -83,6 +87,57 @@ class TestBackendDocumentation(unittest.TestCase):
         for target in local_links:
             with self.subTest(target=target):
                 self.assertTrue(os.path.exists(os.path.join(_REPO_ROOT, target)))
+
+
+class TestRequiredContractsWorkflow(unittest.TestCase):
+    """Documentation-only PRs must execute the real required contracts check."""
+
+    def _workflow(self):
+        path = os.path.join(_REPO_ROOT, ".github", "workflows", "local-preview.yml")
+        with open(path, encoding="utf-8") as stream:
+            # BaseLoader preserves GitHub's `on` key rather than YAML 1.1's bool.
+            return yaml.load(stream, Loader=yaml.BaseLoader)
+
+    def _assert_contract(self, workflow):
+        for event in ("push", "pull_request"):
+            self.assertIn(event, workflow["on"])
+            self.assertIn(workflow["on"][event], (None, "", {}))
+        job = workflow["jobs"]["contracts"]
+        self.assertEqual(job.get("name", "contracts"), "contracts")
+        for scope in [job, *job["steps"]]:
+            self.assertNotIn("if", scope)
+            self.assertNotIn("continue-on-error", scope)
+        expected = shlex.split(
+            "uv run --project mcp --frozen python -m unittest -v "
+            "tests.test_local_render tests.test_blender_cli "
+            "tests.test_tool_listing tests.test_documentation "
+            "tests.test_preview_compatibility tests.test_mcp_server "
+            "tests.integration.test_local_cpu_session"
+        )
+        commands = [shlex.split(step["run"]) for step in job["steps"] if "run" in step]
+        self.assertIn(expected, commands)
+
+    def test_docs_pr_runs_required_contracts(self):
+        self._assert_contract(self._workflow())
+
+    def test_regression_controls_reject_filtered_or_fake_checks(self):
+        workflow = self._workflow()
+        self._assert_contract(workflow)
+        for fault in ("paths", "renamed", "conditional", "ignored_failure", "fake_command"):
+            changed = copy.deepcopy(workflow)
+            job = changed["jobs"]["contracts"]
+            if fault == "paths":
+                changed["on"]["pull_request"] = {"paths": ["mcp/**"]}
+            elif fault == "renamed":
+                job["name"] = "not-required"
+            elif fault == "conditional":
+                job["steps"][-1]["if"] = "false"
+            elif fault == "ignored_failure":
+                job["continue-on-error"] = "true"
+            else:
+                job["steps"][-1]["run"] = "echo passed"
+            with self.subTest(fault=fault), self.assertRaises(AssertionError):
+                self._assert_contract(changed)
 
 
 if __name__ == "__main__":

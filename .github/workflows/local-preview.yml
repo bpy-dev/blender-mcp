@@ -2,15 +2,7 @@ name: Local preview contracts
 
 on:
   push:
-    paths:
-      - 'mcp/**'
-      - 'tests/**'
-      - '.github/workflows/local-preview.yml'
   pull_request:
-    paths:
-      - 'mcp/**'
-      - 'tests/**'
-      - '.github/workflows/local-preview.yml'
 
 permissions:
   contents: read
